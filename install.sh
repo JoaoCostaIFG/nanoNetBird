@@ -1,10 +1,13 @@
 #/usr/bin/env bash
 set -e
 
+OWNER="JoaoCostaIFG"
+REPO="nanoNetBird"
+
 # See if netbird is already present and compare versions
 if [ -f "/usr/sbin/netbird" ]; then
   VERSION_LOCAL="$(/usr/sbin/netbird version)"
-  VERSION_REMOTE="$(curl -sL https://github.com/bc547/nanoNetBird/releases/latest/download/version.txt)"
+  VERSION_REMOTE="$(curl -sL https://github.com/${OWNER}/${REPO}/releases/latest/download/version.txt)"
   echo "Local version: ${VERSION_LOCAL}"
   echo "Remote version: ${VERSION_REMOTE}"
   if [ "$VERSION_LOCAL" == "$VERSION_REMOTE" ]; then
@@ -15,7 +18,7 @@ fi
 
 # Download latest NetBird client to temporary location
 echo "Downloading latest NetBird client..."
-curl -sL -o /usr/sbin/netbird.new https://github.com/bc547/nanoNetBird/releases/latest/download/netbird
+curl -sL -o /usr/sbin/netbird.new https://github.com/${OWNER}/${REPO}/releases/latest/download/netbird
 chmod 555 /usr/sbin/netbird.new
 
 # Move old NetBird client out of the way (if needed)

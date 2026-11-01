@@ -18,7 +18,7 @@ Instructions for registering the nanoKVM device can be found at: https://docs.ne
 Both installation and updating can be performed using a single command
 
 ``` bash
-curl -sL https://github.com/bc547/nanoNetBird/releases/latest/download/install.sh | sh -
+curl -sL https://github.com/JoaoCostaIFG/nanoNetBird/releases/latest/download/install.sh | sh -
 ```
 
 To avoid unnecessary downloads, if NetBird is already installed, the script verifies first if a newer version is available before downloading and applying the update.
