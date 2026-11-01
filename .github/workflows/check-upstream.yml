@@ -1,0 +1,58 @@
+name: Check Upstream
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # Daily at 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # Push tags
+  actions: write # Trigger the Release workflow
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest upstream version
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="$(gh api repos/netbirdio/netbird/releases/latest --jq '.tag_name')"
+          echo "Latest NetBird release: ${TAG}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Get latest local release
+        id: local
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
+            echo "Latest local release: ${TAG}"
+          else
+            TAG=""
+            echo "No local releases found"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Release new version
+        if: steps.upstream.outputs.tag != steps.local.outputs.tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code origin "refs/tags/${TAG}" > /dev/null 2>&1; then
+            # Tag already exists but no matching release: retry the release only
+            echo "Tag ${TAG} already exists, retrying release..."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "${TAG}"
+            git push origin "refs/tags/${TAG}"
+            echo "Pushed tag ${TAG}"
+          fi
+          gh workflow run release.yml --ref "${GITHUB_REF_NAME}" -f "tag=${TAG}"
+          echo "Triggered release for ${TAG}"

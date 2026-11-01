@@ -24,7 +24,7 @@ curl -sL https://github.com/JoaoCostaIFG/nanoNetBird/releases/latest/download/in
 To avoid unnecessary downloads, if NetBird is already installed, the script verifies first if a newer version is available before downloading and applying the update.
 
 > [!NOTE]
-> The install/update script will look for the latest release within **this** repository. However, this repository is not (yet) automatically updated when new versions are published in the official NetBird repository, so it may lag behind.
+> The install/update script will look for the latest release within **this** repository. A daily check automatically creates a new release whenever a new version is published in the official NetBird repository, so it may lag behind by up to a day.
 
 # Files
 
