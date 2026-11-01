@@ -18,6 +18,8 @@ fi
 # Strip the letter v (and any install-script suffix) from the tag name
 VERSION=${TAG%%-*}
 VERSION=${VERSION#v}
+# The upstream NetBird sources always correspond to the plain tag
+UPSTREAM_TAG="v${VERSION}"
 
 # Install-script revision: bumps automatically whenever install.sh
 # changes, so devices pick up installer fixes even without a new
@@ -25,7 +27,7 @@ VERSION=${VERSION#v}
 INSTALL_REV="$(git rev-list --count HEAD -- install.sh)"
 
 echo "Fetching NetBird sources for version $VERSION"
-git clone -c advice.detachedHead=false --depth 1 --branch "$TAG" "$REPO_URL" src-$VERSION
+git clone -c advice.detachedHead=false --depth 1 --branch "$UPSTREAM_TAG" "$REPO_URL" src-$VERSION
 echo "Compiling..."
 mkdir dist
 CURRENT_WD=$PWD
