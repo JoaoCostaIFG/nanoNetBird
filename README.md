@@ -34,7 +34,10 @@ The client configuration files can be found in ```/etc/netbird/``` (as usual).
 
 # Watchdog
 
-A watchdog service is installed at ```/etc/init.d/S99netbird-watchdog```. Because the nanoKVM device has little RAM, the kernel's OOM killer may terminate the NetBird client (it is typically the largest process on the device); the watchdog restarts it within ~15 seconds and also re-applies the firewall rule if it disappears (e.g. after an ```/etc/init.d/S35iptables restart```).
+A watchdog service is installed at ```/etc/init.d/S99netbird-watchdog```. Because the nanoKVM device has little RAM, the kernel's OOM killer may terminate the NetBird client (it is typically the largest process on the device); the watchdog restarts it within ~15 seconds.
+
+> [!NOTE]
+> Incoming traffic on the NetBird interface (```wt0```) is managed by NetBird itself through its ACL chain (```NETBIRD-ACL-INPUT```), according to the access control policy configured in your NetBird account. Older versions of this script installed a blanket firewall rule that bypassed those ACLs; running the latest installer removes it.
 
 Restart attempts back off linearly (up to 5 minutes) while NetBird keeps dying quickly, so a memory-starved device is not hammered with restarts.
 

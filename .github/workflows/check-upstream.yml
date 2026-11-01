@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: install.sh revision is derived from it
 
       - name: Get latest upstream version
         id: upstream
@@ -38,11 +40,45 @@ jobs:
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Release new version
-        if: steps.upstream.outputs.tag != steps.local.outputs.tag
+      - name: Determine release tag
+        id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          LOCAL_TAG: ${{ steps.local.outputs.tag }}
+        run: |
+          # NetBird version part of the local tag, ignoring any -nnbN suffix
+          LOCAL_NB_TAG="$(printf '%s' "$LOCAL_TAG" | sed -E 's/-nnb[0-9]+$//')"
+
+          if [ "$UPSTREAM_TAG" != "$LOCAL_NB_TAG" ]; then
+            # New upstream NetBird release
+            echo "New NetBird version ${UPSTREAM_TAG} (installed: ${LOCAL_NB_TAG:-none})"
+            echo "tag=${UPSTREAM_TAG}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Same NetBird version: re-release only if install.sh changed
+          # since the last release (its revision is embedded in version.txt)
+          INSTALL_REV="$(git rev-list --count HEAD -- install.sh)"
+          EXPECTED="${UPSTREAM_TAG#v}+nnb${INSTALL_REV}"
+
+          TMP="$(mktemp -d)"
+          gh release download "$LOCAL_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern version.txt --dir "$TMP" >/dev/null 2>&1 || true
+          RELEASED="$(cat "$TMP/version.txt" 2>/dev/null || true)"
+          echo "Released version.txt: ${RELEASED:-none}, expected: ${EXPECTED}"
+
+          if [ "$RELEASED" != "$EXPECTED" ]; then
+            TAG="${UPSTREAM_TAG}-nnb${INSTALL_REV}"
+            echo "install.sh changed, releasing ${TAG}"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release
+        if: steps.decide.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.decide.outputs.tag }}
         run: |
           if git ls-remote --exit-code origin "refs/tags/${TAG}" > /dev/null 2>&1; then
             # Tag already exists but no matching release: retry the release only

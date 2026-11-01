@@ -3,14 +3,24 @@ set -e
 
 OWNER="JoaoCostaIFG"
 REPO="nanoNetBird"
+INSTALLED_VERSION_FILE="/etc/netbird/nanonetbird-install-version"
 
-# See if netbird is already present and compare versions
+# The remote version carries an install-script revision (e.g. 0.82.0+nnb12)
+# so that install.sh fixes propagate even without a new NetBird release.
+# The installed revision is tracked in ${INSTALLED_VERSION_FILE}.
+echo "Fetching remote version..."
+VERSION_REMOTE="$(curl -sL https://github.com/${OWNER}/${REPO}/releases/latest/download/version.txt)"
+if [ -z "$VERSION_REMOTE" ]; then
+  echo "Failed to fetch remote version"
+  exit 1
+fi
+
+# See if netbird is already present and up to date
 if [ -f "/usr/sbin/netbird" ]; then
   VERSION_LOCAL="$(/usr/sbin/netbird version)"
-  VERSION_REMOTE="$(curl -sL https://github.com/${OWNER}/${REPO}/releases/latest/download/version.txt)"
   echo "Local version: ${VERSION_LOCAL}"
   echo "Remote version: ${VERSION_REMOTE}"
-  if [ "$VERSION_LOCAL" == "$VERSION_REMOTE" ]; then
+  if [ "$(cat "$INSTALLED_VERSION_FILE" 2>/dev/null)" = "$VERSION_REMOTE" ]; then
     echo "-> Identical... skipping update"
     exit 0
   fi
@@ -46,43 +56,25 @@ sed -i -e 's#/var/log/netbird/client\.log#console#g' \
   -e 's#/var/log/netbird/\$name\.log#/dev/null#g' \
   -e 's#/var/log/netbird/\$name\.err#/dev/null#g' \
   /etc/init.d/S98netbird
-sed -i '/echo "Unable to start, see \$stdout_log and \$stderr_log"/,/fi/ { /fi/ a \
-\
-       # Wait for wt0 interface with timeout\
-       echo "Waiting for NetBird interface..."\
-       for i in $(seq 1 30); do\
-         if ip link show wt0 >/dev/null 2>&1; then\
-           # allow incoming netbird connections (idempotent: never duplicates)\
-           echo "Interface wt0 found, applying firewall rule"\
-           iptables -C INPUT -i wt0 -j ACCEPT 2>/dev/null || iptables -I INPUT -i wt0 -j ACCEPT\
-           break\
-         fi\
-         sleep 5\
-       done
-}' /etc/init.d/S98netbird
 chmod 755 /etc/init.d/S98netbird
-# Warn if the upstream init template changed and the patch no longer applies
-grep -q "iptables -C INPUT -i wt0" /etc/init.d/S98netbird ||
-  echo "WARNING: firewall patch did not apply to the service script!"
 
-# Purge duplicate firewall rules accumulated by older service scripts
-# (the service re-adds a single rule on restart)
+# Remove the blanket firewall rule installed by older versions of this
+# script: NetBird itself manages wt0 ingress (ACL chain + trailing DROP),
+# and the blanket rule shadowed those ACLs.
 while iptables -D INPUT -i wt0 -j ACCEPT 2>/dev/null; do :; done
 
 # Install/regenerate the NetBird watchdog service. It restarts the daemon
 # if it dies unexpectedly (typically the kernel OOM killer on this
-# low-memory device) and re-applies the firewall rule if it goes missing
-# (e.g. after an /etc/init.d/S35iptables restart). Like the service
-# script, it is regenerated on every update.
+# low-memory device). Like the service script, it is regenerated on
+# every update.
 echo "Installing NetBird watchdog..."
 cat >/etc/init.d/S99netbird-watchdog.new <<'WATCHDOG_EOF'
 #!/bin/sh
 # NetBird watchdog (managed by nanoNetBird's install.sh; local edits are
 # overwritten on update).
 #
-# Restarts the NetBird service when its daemon dies unexpectedly and
-# re-applies the wt0 firewall rule if it goes missing (e.g. after an
-# /etc/init.d/S35iptables restart restores /etc/iptables.conf).
+# Restarts the NetBird service when its daemon dies unexpectedly
+# (typically the kernel OOM killer on this low-memory device).
 #
 # Auto-restart is keyed on a STALE pid file (pid file present, process
 # gone): a deliberate `/etc/init.d/S98netbird stop` removes the pid file
@@ -128,14 +120,10 @@ watch_loop() {
     now=$(date +%s)
 
     if "$netbird_init" status >/dev/null 2>&1; then
-      # Healthy: forget past failures once the daemon has been up for
-      # a while, and keep the firewall rule in place (it can be wiped
-      # by an /etc/init.d/S35iptables restart).
+      # Healthy: forget past failures once the daemon has been up for a while
       if [ "$last_start" -gt 0 ] && [ $((now - last_start)) -ge "$stable_uptime" ]; then
         failures=0
       fi
-      iptables -C INPUT -i wt0 -j ACCEPT 2>/dev/null ||
-        iptables -I INPUT -i wt0 -j ACCEPT
       continue
     fi
 
@@ -220,5 +208,9 @@ echo "Restarting NetBird service..."
 
 echo "Restarting NetBird watchdog..."
 /etc/init.d/S99netbird-watchdog restart
+
+# Record what we installed so the version check can skip future no-op runs
+mkdir -p /etc/netbird
+echo "${VERSION_REMOTE}" >"${INSTALLED_VERSION_FILE}"
 
 echo "Done!"
