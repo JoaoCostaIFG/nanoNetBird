@@ -31,3 +31,14 @@ To avoid unnecessary downloads, if NetBird is already installed, the script veri
 The NetBird client is installed to ```/usr/sbin/netbird```, and its service startup script to ```/etc/init.d/S98netbird```.
 
 The client configuration files can be found in ```/etc/netbird/``` (as usual).
+
+# Watchdog
+
+A watchdog service is installed at ```/etc/init.d/S99netbird-watchdog```. Because the nanoKVM device has little RAM, the kernel's OOM killer may terminate the NetBird client (it is typically the largest process on the device); the watchdog restarts it within ~15 seconds and also re-applies the firewall rule if it disappears (e.g. after an ```/etc/init.d/S35iptables restart```).
+
+Restart attempts back off linearly (up to 5 minutes) while NetBird keeps dying quickly, so a memory-starved device is not hammered with restarts.
+
+Notes:
+* The watchdog only restarts NetBird when its pid file is stale (daemon died unexpectedly). A deliberate ```/etc/init.d/S98netbird stop``` is respected and will **not** be overridden.
+* To hold the watchdog off while NetBird is already dead (e.g. while debugging): ```touch /var/run/netbird-watchdog.pause```; remove the file to resume supervision.
+* Watchdog actions are logged to syslog and the console.
