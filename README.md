@@ -45,3 +45,13 @@ Notes:
 * The watchdog only restarts NetBird when its pid file is stale (daemon died unexpectedly). A deliberate ```/etc/init.d/S98netbird stop``` is respected and will **not** be overridden.
 * To hold the watchdog off while NetBird is already dead (e.g. while debugging): ```touch /var/run/netbird-watchdog.pause```; remove the file to resume supervision.
 * Watchdog actions are logged to syslog and the console.
+
+# Automatic updates
+
+The installer also sets up daily automatic updates:
+
+* A cron job (visible in ```/etc/crontabs/root```) runs once per day at a randomized minute between 06:00 and 08:59 UTC, shortly after this repository's daily release workflow (05:00 UTC), so new releases are picked up the same day.
+* The job runs the latest ```install.sh```, which exits immediately if the device is already up to date. Install-script-only fixes (```+nnbN``` releases) are picked up the same way.
+* Output is appended to ```/var/log/nanonetbird-update.log``` (kept bounded to the last few runs).
+* Updates restart the NetBird service, so expect a brief (~30s) overlay blip when a new release lands.
+* To disable automatic updates, remove the tagged line from ```/etc/crontabs/root``` (or stop the cron daemon with ```/etc/init.d/S97crond stop```).

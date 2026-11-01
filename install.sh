@@ -30,6 +30,13 @@ fi
 echo "Downloading latest NetBird client..."
 curl -sL -o /usr/sbin/netbird.new https://github.com/${OWNER}/${REPO}/releases/latest/download/netbird
 chmod 555 /usr/sbin/netbird.new
+# Verify the downloaded binary before replacing the working one
+# (guards unattended updates against truncated/corrupt downloads)
+/usr/sbin/netbird.new version >/dev/null 2>&1 || {
+  echo "Downloaded binary is not executable on this system, aborting"
+  rm -f /usr/sbin/netbird.new
+  exit 1
+}
 
 # Move old NetBird client out of the way (if needed)
 echo "Installing latest NetBird client..."
@@ -203,11 +210,117 @@ chmod 755 /etc/init.d/S99netbird-watchdog.new
 # Atomic replace: safe even if an older watchdog loop is running
 mv /etc/init.d/S99netbird-watchdog.new /etc/init.d/S99netbird-watchdog
 
+# Install the auto-update helper (used by the cron job below). It runs
+# the installer, which exits quickly when the device is already up to
+# date (see the version check at the top of install.sh).
+echo "Installing auto-update helper..."
+cat >/usr/sbin/nanonetbird-update.new <<'UPDATE_EOF'
+#!/bin/sh
+# nanoNetBird auto-update helper (managed by nanoNetBird's install.sh;
+# local edits are overwritten on update).
+
+OWNER="JoaoCostaIFG"
+REPO="nanoNetBird"
+log=/var/log/nanonetbird-update.log
+installer=/tmp/nanonetbird-install.sh
+
+# Keep the log bounded (last ~8KB)
+if [ -f "$log" ] && [ "$(wc -c <"$log")" -gt 16384 ]; then
+  tail -c 8192 "$log" >"$log.tmp" && mv "$log.tmp" "$log"
+fi
+
+{
+  echo "=== $(date -u '+%Y-%m-%d %H:%M:%S UTC') auto-update check ==="
+  if ! curl -sL -o "$installer" "https://github.com/${OWNER}/${REPO}/releases/latest/download/install.sh"; then
+    echo "Failed to download install.sh"
+    exit 1
+  fi
+  sh "$installer"
+  rc=$?
+  echo "=== installer exit code: $rc ==="
+  exit "$rc"
+} >>"$log" 2>&1
+UPDATE_EOF
+chmod 755 /usr/sbin/nanonetbird-update.new
+mv /usr/sbin/nanonetbird-update.new /usr/sbin/nanonetbird-update
+
+# Install the crond starter init script (busybox crond reads the
+# crontabs from /etc/crontabs)
+echo "Installing crond service..."
+cat >/etc/init.d/S97crond.new <<'CROND_EOF'
+#!/bin/sh
+# busybox crond starter (managed by nanoNetBird's install.sh; local
+# edits are overwritten on update). Runs jobs from /etc/crontabs.
+
+name=crond
+script=$(readlink -f "$0")
+
+is_running() {
+  pidof "$name" >/dev/null 2>&1
+}
+
+case "$1" in
+  start)
+    if is_running; then
+      echo "Already started"
+    else
+      echo "Starting $name"
+      /usr/sbin/crond -c /etc/crontabs
+    fi
+    ;;
+  stop)
+    if is_running; then
+      echo "Stopping $name"
+      killall "$name"
+    else
+      echo "Not running"
+    fi
+    ;;
+  restart)
+    "$script" stop
+    "$script" start
+    ;;
+  status)
+    if is_running; then
+      echo "Running"
+    else
+      echo "Stopped"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
+    exit 1
+    ;;
+esac
+exit 0
+CROND_EOF
+chmod 755 /etc/init.d/S97crond.new
+mv /etc/init.d/S97crond.new /etc/init.d/S97crond
+
+# Install the auto-update cron job: one randomized check per day, in a
+# window shortly after the (05:00 UTC) release workflow, so new
+# releases are picked up the same day without all devices checking at
+# the same time.
+echo "Installing auto-update cron job..."
+mkdir -p /etc/crontabs
+CRON_TAG="# nanoNetBird auto-update (managed by install.sh)"
+CRON_MIN=$(( $(od -An -N1 -tu1 /dev/urandom | tr -d ' ') % 60 ))
+CRON_HOUR=$(( 6 + $(od -An -N1 -tu1 /dev/urandom | tr -d ' ') % 3 ))
+# Keep any foreign lines, replace any previous managed line
+grep -v "$CRON_TAG" /etc/crontabs/root 2>/dev/null > /etc/crontabs/root.tmp || true
+echo "${CRON_MIN} ${CRON_HOUR} * * * /usr/sbin/nanonetbird-update ${CRON_TAG}" >>/etc/crontabs/root.tmp
+mv /etc/crontabs/root.tmp /etc/crontabs/root
+chmod 600 /etc/crontabs/root
+
 echo "Restarting NetBird service..."
 /etc/init.d/S98netbird restart
 
 echo "Restarting NetBird watchdog..."
 /etc/init.d/S99netbird-watchdog restart
+
+echo "Restarting crond (picks up the new crontab)..."
+/etc/init.d/S97crond restart
 
 # Record what we installed so the version check can skip future no-op runs
 mkdir -p /etc/netbird
